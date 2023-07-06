@@ -65,18 +65,31 @@ impl Endpoint {
         let len = buf.capacity() as u16;
         let i = self.index as usize;
 
-        epl.eps[i].ep_out[0].modify(|_, w| {
-            w.nbytes()
-                .bits(len)
-                .addroff()
-                .bits(addroff)
-                .a()
-                .active()
-                .d()
-                .enabled() // technically, marked as R (for reserved?) for EP0
-                .s()
-                .not_stalled()
-        });
+        if i == 0 {
+            epl.eps[i].ep_out[0].modify(|_, w| {
+                w.nbytes()
+                    .bits(len)
+                    .addroff()
+                    .bits(addroff)
+                    .a()
+                    .active()
+                    .s()
+                    .not_stalled()
+            });
+        } else {
+            epl.eps[i].ep_out[0].modify(|_, w| {
+                w.nbytes()
+                    .bits(len)
+                    .addroff()
+                    .bits(addroff)
+                    .a()
+                    .active()
+                    .d()
+                    .enabled()
+                    .s()
+                    .not_stalled()
+            });
+        }
     }
 
     // pub fn enable_out_interrupt(&self, usb: &USB1) {
@@ -218,6 +231,7 @@ impl Endpoint {
                     .a()
                     .active()
             });
+            epl.eps[0].ep_out[0].modify(|_, w| w.a().active().s().stalled());
         } else {
             if epl.eps[i].ep_in[0].read().a().is_active() {
                 // NB: With this test in place, `bench_bulk_read` from TestClass fails.
@@ -299,6 +313,7 @@ impl Endpoint {
 
             Ok(count)
         } else {
+            rtt_target::rprintln!("EP0R");
             let intstat_r = usb.intstat.read();
             let devcmdstat_r = usb.devcmdstat.read();
             if !(intstat_r.ep0out().bit_is_set() || devcmdstat_r.setup().bit_is_set()) {
@@ -306,6 +321,7 @@ impl Endpoint {
             }
 
             if devcmdstat_r.setup().bit_is_set() {
+                rtt_target::rprintln!("SETUP");
                 if !self.is_setup_buf_set() {
                     return Err(UsbError::WouldBlock);
                 }
@@ -337,11 +353,13 @@ impl Endpoint {
                 let out_buf = self.out_buf.as_ref().unwrap().borrow(cs);
                 let nbytes = epl.eps[0].ep_out[0].read().nbytes().bits() as usize;
                 let count = min((out_buf.capacity() - nbytes) as usize, buf.len());
+                rtt_target::rprintln!("READ {}", count);
 
                 out_buf.read(&mut buf[..count]);
 
                 self.reset_out_buf(cs, epl);
                 usb.intstat.write(|w| w.ep0out().set_bit());
+                epl.eps[0].ep_out[0].modify(|_, w| w.s().stalled());
 
                 Ok(count)
             }

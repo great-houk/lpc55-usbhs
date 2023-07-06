@@ -78,7 +78,10 @@ impl UsbBus for UsbHSBus {
 
             match ep_dir {
                 UsbDirection::Out if !ep.is_out_buf_set() => {
-                    let size = max_packet_size;
+                    let mut size = max_packet_size;
+                    if index == 0 {
+                        size += 1;
+                    }
                     let buffer = self.ep_allocator.allocate_buffer(size as _)?;
                     ep.set_out_buf(buffer);
                     debug_assert!(ep.is_out_buf_set());
