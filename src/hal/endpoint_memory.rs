@@ -1,22 +1,14 @@
+use super::constants::{UsbAccessType, EP_MEM_ADDR, EP_MEM_SIZE, EP_REGISTERS_SIZE};
 use core::{cmp::min, slice};
-
 use usb_device::{Result, UsbError};
 use vcell::VolatileCell;
-
-use super::constants::{UsbAccessType, EP_MEM_ADDR, EP_MEM_SIZE, EP_REGISTERS_SIZE};
-
-// The USB FS peripheral is flexible about which SRAM to use.
-// - On the one hand, the USB HS has no access to regular SRAM, and
-// must use "USB1_SRAM" at 0x4010_0000 (size 0x4000, 4KB). We can also
-// use this for USB FS.
-// - On the other, we could use a stack-allocated or static buffer.
-//   --> do this too later on
 
 pub struct EndpointBuffer(&'static mut [VolatileCell<UsbAccessType>]);
 
 const EP_MEM_PTR: *mut VolatileCell<UsbAccessType> =
     EP_MEM_ADDR as *mut VolatileCell<UsbAccessType>;
 
+#[allow(unused)]
 impl EndpointBuffer {
     pub fn new(offset: usize, size: usize) -> Self {
         let addr = unsafe { EP_MEM_PTR.add(offset) };
@@ -25,9 +17,6 @@ impl EndpointBuffer {
     }
 
     pub fn read(&self, buf: &mut [u8]) {
-        // for i in 0..min(buf.len(), self.0.len()) {
-        //     buf[i] = self.0[i].get();
-        // }
         let count = min(buf.len(), self.0.len());
         for (i, entry) in buf.iter_mut().enumerate().take(count) {
             *entry = self.0[i].get();
@@ -35,9 +24,6 @@ impl EndpointBuffer {
     }
 
     pub fn write(&self, buf: &[u8]) {
-        // for i in 0..min(buf.len(), self.0.len()) {
-        //     self.0[i].set(buf[i]);
-        // }
         let count = min(buf.len(), self.0.len());
         for (i, entry) in buf.iter().enumerate().take(count) {
             self.0[i].set(*entry);
@@ -53,7 +39,6 @@ impl EndpointBuffer {
         self.0.as_ptr() as u32
     }
 
-    // blee... capacity
     pub fn capacity(&self) -> usize {
         self.0.len()
     }
@@ -86,11 +71,6 @@ impl EndpointMemoryAllocator {
         // buffers have to be 64 byte aligned
         let addr = (next_free_addr + EndpointMemoryAllocator::ALIGN - 1)
             & !(EndpointMemoryAllocator::ALIGN - 1);
-        // let addr = if next_free_addr & 0x3f > 0 {
-        //     (next_free_addr & !0x3f) + 64
-        // } else {
-        //     next_free_addr
-        // };
 
         let offset = addr - EP_MEM_ADDR;
         if offset + size > EP_MEM_SIZE {

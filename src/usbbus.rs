@@ -38,7 +38,7 @@ impl UsbHSBus {
                     *endpoint = core::mem::MaybeUninit::new(Endpoint::new(i as u8));
                 }
 
-                unsafe { core::mem::transmute::<_, [Endpoint; NUM_ENDPOINTS]>(endpoints) }
+                unsafe { core::mem::transmute::<_, _>(endpoints) }
             },
         };
 
@@ -59,11 +59,13 @@ impl UsbBus for UsbHSBus {
         max_packet_size: u16,
         _interval: u8,
     ) -> Result<EndpointAddress> {
-        // well this is clever but is it readable
-        for index in ep_addr
-            .map(|a| a.index()..a.index() + 1)
-            .unwrap_or(1..NUM_ENDPOINTS)
-        {
+        let addr_range = if let Some(addr) = ep_addr {
+            addr.index()..addr.index() + 1
+        } else {
+            1..NUM_ENDPOINTS
+        };
+
+        for index in addr_range {
             let ep = &mut self.endpoints[index];
 
             match ep.ep_type() {
@@ -79,6 +81,7 @@ impl UsbBus for UsbHSBus {
             match ep_dir {
                 UsbDirection::Out if !ep.is_out_buf_set() => {
                     let mut size = max_packet_size;
+                    // ZLP NYET Fix
                     if index == 0 {
                         size += 1;
                     }
@@ -113,7 +116,6 @@ impl UsbBus for UsbHSBus {
     }
 
     fn enable(&mut self) {
-        // cortex_m_semihosting::hprintln!("Enabling UsbBus").ok();
         interrupt::free(|cs| {
             let usb = self.usb_regs.borrow(cs);
             let eps = self.ep_regs.borrow(cs);
@@ -162,47 +164,34 @@ impl UsbBus for UsbHSBus {
                 .devcmdstat
                 .modify(|_, w| w.dev_en().set_bit().dcon().set_bit());
 
-            // HERE TOO?
+            // Enable Interrupts
             usb.dev
                 .inten
                 .modify(|r, w| unsafe { w.bits(r.bits() | ((1 << 11) - 1)) });
-            usb.dev
-                .inten
-                .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 31)) });
+            usb.dev.inten.modify(|_, w| w.dev_int_en().set_bit());
         });
     }
 
     fn reset(&self) {
-        // cortex_m_semihosting::hprintln!("Resetting UsbBus").ok();
         interrupt::free(|cs| {
-            // set device address to 0
+            // Set device address to 0
             let usb = self.usb_regs.borrow(cs);
             let eps = self.ep_regs.borrow(cs);
-
             usb.dev
                 .devcmdstat
                 .modify(|_, w| unsafe { w.dev_addr().bits(0) });
 
+            // Reset EPs
             for ep in self.endpoints.iter() {
                 ep.configure(cs, &usb.dev, eps);
             }
 
-            // clear all interrupts
+            // Clear all interrupts
             usb.dev.intstat.write(|w| unsafe { w.bits(!0) });
-
-            // enable them
-            // TODO: do this by endpoint
-            // cortex_m_semihosting::hprintln!("inten bef = {:#X}", usb.inten.read().bits()).ok();
-            // usb.inten.modify(|r, w| unsafe { w.bits(r.bits() | ((1 << 10) - 1)) } );
-            // usb.inten.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 31)) } );
-            // cortex_m_semihosting::hprintln!("inten aft = {:#X}", usb.inten.read().bits()).ok();
         });
-        // #[cfg(feature = "logging")]
-        // info!("reset USB device").ok();
     }
 
     fn set_device_address(&self, addr: u8) {
-        // cortex_m_semihosting::hprintln!("Setting UsbBus device address {}", addr).ok();
         interrupt::free(|cs| {
             self.usb_regs
                 .borrow(cs)
@@ -216,27 +205,13 @@ impl UsbBus for UsbHSBus {
         interrupt::free(|cs| {
             let usb = self.usb_regs.borrow(cs);
             let eps = self.ep_regs.borrow(cs);
-            // WOAH WHYY DOES IT WORK WITH THIS??
-            // cortex_m_semihosting::hprintln!("inten = {:#X}", usb.inten.read().bits()).ok();
-            // let _ = usb.inten.read().bits();
 
             let devcmdstat = &usb.dev.devcmdstat;
             let intstat = &usb.dev.intstat;
 
-            // let ints = intstat.read().bits();
-            // if ints != 0 {
-            //     cortex_m_semihosting::hprintln!("intstat = {:?}", intstat.read().bits()).ok();
-            //     cortex_m_semihosting::hprintln!("inten = {:?}", usb.inten.read().bits()).ok();
-            // }
-
-            // if intstat.read().dev_int().bit_is_set() {
-            //     usb.intstat.write(|w| w.dev_int().set_bit());
-            // }
-
             // Bus reset flag?
             if devcmdstat.read().dres_c().bit_is_set() {
                 devcmdstat.modify(|_, w| w.dres_c().set_bit());
-                // debug_assert!(devcmdstat.read().dres_c().bit_is_clear());
                 return PollResult::Reset;
             }
 
@@ -275,15 +250,11 @@ impl UsbBus for UsbHSBus {
 
             if intstat_r.ep0in().bit_is_set() {
                 intstat.write(|w| w.ep0in().set_bit());
-                debug_assert!(intstat.read().ep0in().bit_is_clear());
                 ep_in_complete |= bit;
 
                 // EP0 needs manual toggling of Active bits
                 // Weeelll interesting, not changing this makes no difference
                 eps.eps[0].ep_in[0].modify(|_, w| w.a().not_active());
-                // BELOW SEEMS NO LONGER NECESSARY!
-                // prevents OUT-DATA-NAK
-                // modify_endpoint!(endpoint_list, eps, EP0OUT, A: Active);
             }
 
             // non-CONTROL

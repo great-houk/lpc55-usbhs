@@ -9,9 +9,9 @@ use lpc55_hal::{
 };
 
 pub struct UsbHS {
-    pub(crate) phy: USBPHY,
+    pub(crate) _phy: USBPHY,
     pub(crate) dev: USB1,
-    pub(crate) host: USBHSH,
+    pub(crate) _host: USBHSH,
 }
 
 impl UsbHS {
@@ -33,7 +33,6 @@ impl UsbHS {
             let pac = unsafe { lpc55_hal::raw::Peripherals::steal() };
             (pac.USBPHY, pac.USB1, pac.USBHSH)
         };
-        // Set up device
 
         // Reset devices
         syscon.reset(&mut host);
@@ -104,8 +103,10 @@ impl UsbHS {
         syscon.enable_clock(&mut dev);
 
         //
-        Self { phy, dev, host }
+        Self {
+            _phy: phy,
+            dev,
+            _host: host,
+        }
     }
 }
-
-unsafe impl Sync for UsbHS {}

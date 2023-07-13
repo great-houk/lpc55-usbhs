@@ -1,7 +1,6 @@
 use super::{
     endpoint_memory::EndpointBuffer, endpoint_registers::Instance as EndpointRegistersInstance,
 };
-use core::cmp::min;
 use cortex_m::interrupt::{CriticalSection, Mutex};
 use usb_device::{endpoint::EndpointType, Result, UsbError};
 
@@ -143,14 +142,8 @@ impl Endpoint {
 
         let buf = self.in_buf.as_ref().unwrap().borrow(cs);
         let addroff = self.buf_addroff(buf);
-        // let len = buf.len() as u32;
 
         let i = self.index as usize;
-        if i > 0 {
-            debug_assert!(epl.eps[i].ep_in[0].read().a().is_not_active());
-            // while epl.eps[i].ep_in[0].read().a().is_active() {}
-        }
-
         if i == 0 {
             epl.eps[0].ep_in[0].modify(|_, w| {
                 w.nbytes()
@@ -275,45 +268,29 @@ impl Endpoint {
             // need an ergonomic way to map i to register field
             let ep_out_offset = i << 1;
             let ep_out_mask = 1u32 << ep_out_offset;
-
             let ep_out_int = (usb.intstat.read().bits() & ep_out_mask) != 0;
-
             let ep_out_is_active = epl.eps[i].ep_out[0].read().a().is_active();
-
-            if ep_out_int && ep_out_is_active {
-                // cortex_m_semihosting::hprintln!("what the hello, EP {} signals interrupt but it's still active", i).ok();
-            }
 
             if !ep_out_int || ep_out_is_active {
                 return Err(UsbError::WouldBlock);
             }
+
             let out_buf = self.out_buf.as_ref().unwrap().borrow(cs);
-
             let nbytes = epl.eps[i].ep_out[0].read().nbytes().bits() as usize;
-
-            // let count = min((out_buf.capacity() - nbytes) as usize, buf.len());
             let count = (out_buf.capacity() - nbytes) as usize;
+
+            if buf.len() < count {
+                return Err(UsbError::BufferOverflow);
+            }
 
             out_buf.read(&mut buf[..count]);
 
             unsafe { usb.intstat.write(|w| w.bits(ep_out_mask)) };
 
-            // self.reset_out_buf(cs, epl);
-            epl.eps[i].ep_out[0].modify(
-                |_, w| {
-                    w.nbytes()
-                        .bits(out_buf.capacity() as u16)
-                        .addroff()
-                        .bits(self.buf_addroff(out_buf))
-                        .a()
-                        .active()
-                }, // .d().enabled()
-                   // .s().not_stalled()
-            );
+            self.reset_out_buf(cs, epl);
 
             Ok(count)
         } else {
-            rtt_target::rprintln!("EP0R");
             let intstat_r = usb.intstat.read();
             let devcmdstat_r = usb.devcmdstat.read();
             if !(intstat_r.ep0out().bit_is_set() || devcmdstat_r.setup().bit_is_set()) {
@@ -321,14 +298,12 @@ impl Endpoint {
             }
 
             if devcmdstat_r.setup().bit_is_set() {
-                rtt_target::rprintln!("SETUP");
                 if !self.is_setup_buf_set() {
                     return Err(UsbError::WouldBlock);
                 }
 
                 let setup_buf = self.setup_buf.as_ref().unwrap().borrow(cs);
                 if buf.len() < 8 {
-                    // this should never occur
                     return Err(UsbError::BufferOverflow);
                 }
                 setup_buf.read(&mut buf[..8]);
@@ -341,10 +316,8 @@ impl Endpoint {
                 epl.eps[0].ep_in[0].modify(|_, w| w.a().not_active().s().not_stalled());
 
                 usb.intstat.write(|w| w.ep0in().set_bit());
-                debug_assert!(usb.intstat.read().ep0in().bit_is_clear());
 
                 usb.devcmdstat.modify(|_, w| w.setup().set_bit());
-                debug_assert!(usb.devcmdstat.read().setup().bit_is_clear());
 
                 // prepare to receive more
                 self.reset_out_buf(cs, epl);
@@ -352,8 +325,11 @@ impl Endpoint {
             } else {
                 let out_buf = self.out_buf.as_ref().unwrap().borrow(cs);
                 let nbytes = epl.eps[0].ep_out[0].read().nbytes().bits() as usize;
-                let count = min((out_buf.capacity() - nbytes) as usize, buf.len());
-                rtt_target::rprintln!("READ {}", count);
+                let count = out_buf.capacity() - nbytes;
+
+                if buf.len() < count {
+                    return Err(UsbError::BufferOverflow);
+                }
 
                 out_buf.read(&mut buf[..count]);
 

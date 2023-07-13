@@ -1,3 +1,4 @@
+#![allow(unused)]
 use super::constants::{EP_MEM_ADDR, NUM_ENDPOINTS};
 use core::marker::PhantomData;
 
