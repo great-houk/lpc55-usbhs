@@ -141,6 +141,8 @@ impl UsbBus for UsbHSBus {
             }
             self.max_endpoint = max;
 
+            usb.phy.ctrl_clr.write(|w| w.clkgate().set_bit());
+
             // DATABUFSTART
             unsafe {
                 // lower part is stored in endpoint registers

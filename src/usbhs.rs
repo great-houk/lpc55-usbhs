@@ -9,7 +9,7 @@ use lpc55_hal::{
 };
 
 pub struct UsbHS {
-    pub(crate) _phy: USBPHY,
+    pub(crate) phy: USBPHY,
     pub(crate) dev: USB1,
     pub(crate) _host: USBHSH,
 }
@@ -88,9 +88,7 @@ impl UsbHS {
             .modify(|_, w| w.pll_power().set_bit().pll_en_usb_clks().set_bit());
 
         phy.ctrl.modify(|_, w| {
-            w.clkgate()
-                .clear_bit()
-                .enautoclr_clkgate()
+            w.enautoclr_clkgate()
                 .set_bit()
                 .enautoclr_phy_pwd()
                 .clear_bit()
@@ -104,7 +102,7 @@ impl UsbHS {
 
         //
         Self {
-            _phy: phy,
+            phy,
             dev,
             _host: host,
         }
