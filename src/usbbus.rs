@@ -159,6 +159,9 @@ impl UsbBus for UsbHSBus {
                     .modify(|_, w| w.ep_list().bits(epliststart >> 8));
             }
 
+            // Clear PHY gate
+            usb.phy.ctrl_clr.write(|w| w.clkgate().set_bit());
+
             // ENABLE + CONNECT
             usb.dev
                 .devcmdstat
