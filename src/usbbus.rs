@@ -218,19 +218,10 @@ impl UsbBus for UsbHSBus {
                 return PollResult::Reset;
             }
 
-            // if devcmdstat.read().dsus_c().bit_is_set() {
-            //     cortex_m_semihosting::hprintln!("suspend bit set!").ok();
-            // }
-
-            // if devcmdstat.read().dsus_c().bit_is_set() {
-            //     cortex_m_semihosting::hprintln!("device suspended!").ok();
-            // }
-
-            // if devcmdstat.read().dcon_c().bit_is_set() {
-            //     cortex_m_semihosting::hprintln!("connect bit set!").ok();
-            // }
-
-            // TODO: Resume, Suspend handling
+            // Suspend flag
+            if devcmdstat.read().dsus_c().bit_is_set() || devcmdstat.read().lpm_sus().bit_is_set() {
+                return PollResult::Suspend;
+            }
 
             let mut ep_out = 0;
             let mut ep_in_complete = 0;
@@ -388,21 +379,17 @@ impl UsbBus for UsbHSBus {
         })
     }
 
-    fn suspend(&self) {
-        // cortex_m_semihosting::hprintln!("suspend not implemented!").unwrap();
-        // interrupt::free(|cs| {
-        //      self.regs.borrow(cs).cntr.modify(|_, w| w
-        //         .fsusp().set_bit()
-        //         .lpmode().set_bit());
-        // });
-    }
+    fn suspend(&self) {}
 
     fn resume(&self) {
-        // cortex_m_semihosting::hprintln!("resume not implemented!").unwrap();
-        // interrupt::free(|cs| {
-        //     self.regs.borrow(cs).cntr.modify(|_, w| w
-        //         .fsusp().clear_bit()
-        //         .lpmode().clear_bit());
-        // });
+        interrupt::free(|cs| {
+            let usb = self.usb_regs.borrow(cs);
+            let devcmdstat = &usb.dev.devcmdstat;
+
+            if devcmdstat.read().lpm_rewp().bit_is_set() {
+                devcmdstat.modify(|_, w| w.lpm_sus().clear_bit());
+            }
+            devcmdstat.modify(|_, w| w.dsus().clear_bit());
+        });
     }
 }
